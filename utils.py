@@ -231,7 +231,7 @@ def generate_dataset(input_path, output_path, config):
         #     print("####" if bt_data[1][ii] == 1 else "", bt_data[1][ii], d_data[1][ii])
         one_data = {
             'num_atom': config.max_natoms,
-            'atom_type': torch.Tensor([0] * 54 + [1] * 71 + [2] * 1),#torch.Tensor(c_data),
+            'atom_type': torch.Tensor([6] * 54 + [7] * 71 + [15] * 1),#torch.Tensor(c_data),
             'bond_type': torch.Tensor(matrix_data),
             'logP_SA_cycle_normalized': torch.Tensor([gaps[i]])
         }

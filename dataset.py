@@ -74,12 +74,12 @@ class MyDataset(InMemoryDataset):
             for idx in indices:
                 mol = mols[idx]
 
-                x = mol['atom_type'].to(torch.long).view(-1, 1)
+                x = mol['atom_type'].to(torch.float32).view(-1, mol['atom_type'].shape[1]) #  x = mol['atom_type'].to(torch.long).view(-1, 1)
                 y = mol['logP_SA_cycle_normalized'].to(torch.float)
 
                 adj = mol['bond_type']
                 edge_index = adj.nonzero(as_tuple=False).t().contiguous()
-                edge_attr = adj[edge_index[0], edge_index[1]].to(torch.float64)
+                edge_attr = adj[edge_index[0], edge_index[1]].to(torch.float32)  # torch.long
                 # print("x:", x)
                 data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr,
                             y=y)

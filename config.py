@@ -13,6 +13,7 @@ class Config:
     format_dmat = "DMATRIX_{}"
     format_conf = "COORD_{}"
     format_eigen = "EIGENVAL_{}"
+    format_charge = "charge_data_{}"
     loss_fn_id = 1
 
     epoch = 100

@@ -7,42 +7,16 @@ import numpy as np
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchsummary import summary
 
 from config import config
-from model import MyNetwork
+from model_gcn import MyNetwork, train, test
 from dataset import MyDataset
 from utils import *
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
-def train(model, args, train_loader, optimizer):
-    model.train()
-    # print("length: {}".format(len(train_loader)))
-    total_loss = 0
-    for batch_i, data in tqdm(enumerate(train_loader), total=int(len(train_loader.dataset) / args.batch_size)):
-        data = data.to(args.device)
-        optimizer.zero_grad()
-        out = model(data.x, data.edge_index, data.edge_attr, data.batch)
-        loss = (out.squeeze() - data.y).abs().mean()
-        loss.backward()
-        total_loss += loss.item() * data.num_graphs
-        optimizer.step()
-    loss = total_loss / len(train_loader.dataset)
-    return model, loss
-
-
-@torch.no_grad()
-def test(model, args, loader):
-    model.eval()
-    total_error = 0
-    for data in loader:
-        data = data.to(args.device)
-        out = model(data.x, data.edge_index, data.edge_attr, data.batch)
-        total_error += (out.squeeze() - data.y).abs().sum().item()
-    loss = total_error / len(loader.dataset)
-    return loss
 
 
 def run():
@@ -106,9 +80,12 @@ def run():
 
     regression_result_train_true = osp.join(main_save_path, "train_true.npy")
     regression_result_train_pred = osp.join(main_save_path, "train_pred.npy")
+    regression_result_val_true = f"{main_save_path}/val_true.npy"
+    regression_result_val_pred = f"{main_save_path}/val_pred.npy"
     regression_result_test_true = f"{main_save_path}/test_true.npy"
     regression_result_test_pred = f"{main_save_path}/test_pred.npy"
     figure_regression_train_path = f"{main_save_path}/regression_train.png"
+    figure_regression_val_path = f"{main_save_path}/regression_val.png"
     figure_regression_test_path = f"{main_save_path}/regression_test.png"
     print("main_save_path: {}".format(main_save_path))
     print("model_save_path: {}".format(model_save_path))
@@ -117,15 +94,20 @@ def run():
     print("figure_save_path_loss_last_quarter: {}".format(figure_save_path_loss_last_quarter))
     print("regression_result_train_true: {}".format(regression_result_train_true))
     print("regression_result_train_pred: {}".format(regression_result_train_pred))
+    print("regression_result_val_true: {}".format(regression_result_val_true))
+    print("regression_result_val_pred: {}".format(regression_result_val_pred))
     print("regression_result_test_true: {}".format(regression_result_test_true))
     print("regression_result_test_pred: {}".format(regression_result_test_pred))
     print("figure_regression_train_path: {}".format(figure_regression_train_path))
+    print("figure_regression_val_path: {}".format(figure_regression_val_path))
     print("figure_regression_test_path: {}".format(figure_regression_test_path))
 
     model = MyNetwork(deg).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, min_lr=0.00001)
-
+    # summary(model, [(126, 4), (2, 324), (324,), (126,)])  # ((8064, 1), (2, 20736), 20736, 8064)
+    # summary(model)
+    print(model)
     print("[Step 4] Training...")
 
     start_time = time.time()
@@ -208,6 +190,8 @@ def run():
     model.eval()
     train_true_list = []
     train_pred_list = []
+    val_true_list = []
+    val_pred_list = []
     test_true_list = []
     test_pred_list = []
     # train_dataset = MolDataset(train_logp, Y, args)
@@ -215,6 +199,8 @@ def run():
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=2,
                                   worker_init_fn=worker_init_fn, generator=g, shuffle=False)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=2, worker_init_fn=worker_init_fn,
+                                 generator=g, shuffle=False)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, num_workers=2, worker_init_fn=worker_init_fn,
                                  generator=g, shuffle=False)
 
     total_error = 0
@@ -225,6 +211,15 @@ def run():
         train_pred_list += list(out.squeeze().cpu().detach().numpy())
         total_error += (out.squeeze() - data.y).abs().sum().item()
     train_loss = total_error / len(train_dataloader.dataset)
+    total_error = 0
+
+    for data in val_dataloader:
+        data = data.to(args.device)
+        out = model(data.x, data.edge_index, data.edge_attr, data.batch)
+        val_true_list += list(data.y.cpu().detach().numpy())
+        val_pred_list += list(out.squeeze().cpu().detach().numpy())
+        total_error += (out.squeeze() - data.y).abs().sum().item()
+    val_loss = total_error / len(val_dataloader.dataset)
 
     total_error = 0
     for data in test_dataloader:
@@ -235,17 +230,22 @@ def run():
         total_error += (out.squeeze() - data.y).abs().sum().item()
     test_loss = total_error / len(test_dataloader.dataset)
 
+
     train_true_list = np.asarray(train_true_list)
     train_pred_list = np.asarray(train_pred_list)
+    val_true_list = np.asarray(val_true_list)
+    val_pred_list = np.asarray(val_pred_list)
     test_true_list = np.asarray(test_true_list)
     test_pred_list = np.asarray(test_pred_list)
 
     np.save(regression_result_train_true, train_true_list)
     np.save(regression_result_train_pred, train_pred_list)
+    np.save(regression_result_val_true, val_true_list)
+    np.save(regression_result_val_pred, val_pred_list)
     np.save(regression_result_test_true, test_true_list)
     np.save(regression_result_test_pred, test_pred_list)
 
-    print("[Step 7] Drawing testing result...")
+    print("[Step 7] Drawing train/val/test result...")
 
     r_train = compute_correlation(train_true_list, train_pred_list)
     draw_two_dimension_regression(
@@ -254,13 +254,29 @@ def run():
         color_list=["red"],
         legend_list=["Regression: R={0:.3f}, R^2={1:.3f}".format(r_train, r_train ** 2.0)],
         line_style_list=["solid"],
-        fig_title="Regression - {0} - Loss{1} = {2:.3f} - Train - {3} points".format(args.dataset, args.loss_fn_id, train_loss, len(train_true_list)),
+        fig_title="Regression - {0} - Train - {1} points".format(args.dataset, len(train_true_list)),
         fig_x_label="Truth",
         fig_y_label="Predict",
         fig_size=(8, 6),
         show_flag=False,
         save_flag=True,
         save_path=figure_regression_train_path
+    )
+
+    r_val = compute_correlation(val_true_list, val_pred_list)
+    draw_two_dimension_regression(
+        x_lists=[val_true_list],
+        y_lists=[val_pred_list],
+        color_list=["red"],
+        legend_list=["Regression: R={0:.3f}, R^2={1:.3f}".format(r_val, r_val ** 2.0)],
+        line_style_list=["solid"],
+        fig_title="Regression - {0} - Val - {1} points".format(args.dataset, len(val_true_list)),
+        fig_x_label="Truth",
+        fig_y_label="Predict",
+        fig_size=(8, 6),
+        show_flag=False,
+        save_flag=True,
+        save_path=figure_regression_val_path
     )
 
     r_test = compute_correlation(test_true_list, test_pred_list)
@@ -270,7 +286,7 @@ def run():
         color_list=["red"],
         legend_list=["Regression: R={0:.3f}, R^2={1:.3f}".format(r_test, r_test ** 2.0)],
         line_style_list=["solid"],
-        fig_title="Regression - {0} - Loss{1} = {2:.3f} - Test - {3} points".format(args.dataset, args.loss_fn_id, test_loss, len(test_true_list)),
+        fig_title="Regression - {0} - Test - {1} points".format(args.dataset, len(test_true_list)),
         fig_x_label="Truth",
         fig_y_label="Predict",
         fig_size=(8, 6),

@@ -14,69 +14,33 @@ import time
 from dataset import MyDataset
 from tqdm import tqdm
 
+import argparse
+import os.path as osp
+
+import torch
+import torch.nn.functional as F
+
+import torch_geometric.transforms as T
+from torch_geometric.datasets import Planetoid
+# from torch_geometric.logging import init_wandb, log
+from torch_geometric.nn import GCNConv
+
 
 class MyNetwork(torch.nn.Module):
-    def __init__(self, _deg):
+    def __init__(self, deg=None, in_channels=10, hidden_channels=5, out_channels=1):
         super().__init__()
+        self.conv1 = GCNConv(in_channels, hidden_channels, cached=True,
+                             normalize=True)
+        self.conv2 = GCNConv(hidden_channels, out_channels, cached=True,
+                             normalize=True)
 
-        # self.node_emb = Embedding(21, 75)
-        self.edge_emb = Embedding(4, 10)  # self.edge_emb = Embedding(4, 50)
-
-        self.conv_num = 2
-        self.in_num = 10
-
-        aggregators = ['mean', 'min', 'max', 'std']
-        scalers = ['identity', 'amplification', 'attenuation']
-
-        self.convs = ModuleList()
-        self.batch_norms = ModuleList()
-        # for _ in range(4):
-        #     conv = PNAConv(in_channels=75, out_channels=75,
-        #                    aggregators=aggregators, scalers=scalers, deg=_deg,
-        #                    edge_dim=50, towers=5, pre_layers=1, post_layers=1,
-        #                    divide_input=False)
-        #     self.convs.append(conv)
-        #     self.batch_norms.append(BatchNorm(75))
-
-        for _ in range(self.conv_num):
-            conv = PNAConv(in_channels=self.in_num, out_channels=self.in_num,
-                           aggregators=aggregators, scalers=scalers, deg=_deg,
-                           edge_dim=10, towers=5, pre_layers=1, post_layers=1,
-                           divide_input=False)
-            self.convs.append(conv)
-            self.batch_norms.append(BatchNorm(self.in_num))
-
-        # self.mlp1 = Sequential(Linear(4, 25), ReLU(), Linear(25, 50), ReLU(), Linear(50, 75))
-        # self.mlp2 = Sequential(Linear(75, 50), ReLU(), Linear(50, 25), ReLU(), Linear(25, 1))
-        self.mlp1 = Sequential(Linear(10, 5), ReLU(), Linear(5, self.in_num))
-        self.mlp2 = Sequential(Linear(self.in_num, 5), ReLU(), Linear(5, 1))
-        # self.fc = Sequential(Linear(3, 1))
-
-    def forward(self, x, edge_index, edge_attr, batch):
-        # print(x)
-        # print("x_cp1: {}".format(x.shape))
-        # x = self.node_emb(x.squeeze())
-        # print("x_cp2: {}".format(x.shape))
-        x = self.mlp1(x)
-        # print("x_cp3: {}".format(x.shape))
-        edge_attr = self.edge_emb(edge_attr)
-        """
-        x_cp1: torch.Size([8064, 1])
-        x_cp2: torch.Size([8064, 75])
-        x_cp3: torch.Size([8064, 75])
-        x_before: torch.Size([8064, 75])
-        x_after: torch.Size([64, 75])
-        """
-        for conv, batch_norm in zip(self.convs, self.batch_norms):
-            x = F.relu(batch_norm(conv(x, edge_index, edge_attr)))
-        # print("x_before: {}".format(x.shape))
-        # print(x)
-        # print("batch: {}".format(batch.shape))
-        # print(batch)
+    def forward(self, x, edge_index, edge_weight=None, batch=None):
+        x = F.dropout(x, p=0.5, training=self.training)
+        x = self.conv1(x, edge_index, edge_weight).relu()
+        x = F.dropout(x, p=0.5, training=self.training)
+        x = self.conv2(x, edge_index, edge_weight)
         x = global_add_pool(x, batch)
-        # print("x_after: {}".format(x.shape))
-        res = self.mlp2(x)
-        return res
+        return x
 
 
 def train(model, args, train_loader, optimizer):
